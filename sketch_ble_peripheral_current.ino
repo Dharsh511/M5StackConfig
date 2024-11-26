@@ -1,9 +1,24 @@
+#include <AES.h>
+#include <AESLib.h>
+#include <AES_config.h>
+#include <xbase64.h>
+#undef dump
+
 #include <M5Core2.h>
+#include <M5Display.h>
+#include <Wire.h>
+#include "driver/gpio.h"
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
+
+
 //#include <BLE2902.h>
 #include <JWT_RS256.h>
+extern "C" {
+  #include "crypto/base64.h"
+  
+}
 
 JWT_RS256 token_manager;
 
@@ -102,6 +117,7 @@ void playUnlockSound(){
   M5.Spk.PlaySound(unlockSoundData, unlockSoundDataSize);
 }
 
+
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
@@ -116,58 +132,183 @@ class MyServerCallbacks: public BLEServerCallbacks {
       playBeep();
       deviceConnected = false;
       M5.Lcd.println(F("\nDevice Disconnected"));
+      Serial.println("Device Disconnected");
       pServer->getAdvertising()->start();
     }
 };
 
+
+
 class UnlockCallbacks : public BLECharacteristicCallbacks {
-  std::string fullToken = "";  // Buffer to store the concatenated token chunks
+    std::string fullToken = "";  // Buffer to store the concatenated token chunks
 
-  void onWrite(BLECharacteristic *pCharacteristic) {
-    std::string tokenChunk = pCharacteristic->getValue();
+    void onWrite(BLECharacteristic *pCharacteristic) override {
+        std::string tokenChunk = std::string(pCharacteristic->getValue().c_str());
 
-    if (!tokenChunk.empty()) {
-      // Concatenate the received chunk to the full token
-      fullToken += tokenChunk;
+        if (!tokenChunk.empty()) {
+            fullToken += tokenChunk;
 
-      // Check if the token chunk contains the end delimiter (e.g., "END_OF_TOKEN")
-      size_t endPos = tokenChunk.find("END_OF_TOKEN");
-      if (endPos != std::string::npos) {
-        M5.Lcd.println(F("END_OF_TOKEN delimiter found."));
+            size_t endPos = tokenChunk.find("END_OF_TOKEN");
+            if (endPos != std::string::npos) {
+                size_t delimiterPos = fullToken.find("END_OF_TOKEN");
+                if (delimiterPos != std::string::npos) {
+                    fullToken = fullToken.substr(0, delimiterPos);
+                }
 
-        // Remove the "END_OF_TOKEN" delimiter from the full token
-        size_t delimiterPos = fullToken.find("END_OF_TOKEN");
-        if (delimiterPos != std::string::npos) {
-          fullToken = fullToken.substr(0, delimiterPos);
-        }
+                String encryptedTokenBase64 = String(fullToken.c_str());
+                Serial.println(encryptedTokenBase64);
+                Serial.printf("Encrypted Token Length: %d\n", encryptedTokenBase64.length());
 
-        M5.Lcd.println(F("Full ID Token received:"));
+                // Decode the Base64-encoded encrypted token
+                size_t base64DecodedLength = (encryptedTokenBase64.length() * 3) / 4;
+                uint8_t* decryptedData = (uint8_t*)malloc(base64DecodedLength);  // Allocate memory for decrypted data
+                if (!decryptedData) {
+                    M5.Lcd.println(F("Memory allocation for decryptedData failed."));
+                    return;
+                }
 
-        // Convert to String for validation
-        String jwtToken = String(fullToken.c_str());
-        M5.Lcd.printf("Assembled Token Length: %d\n", jwtToken.length());
+                unsigned char* decodedToken = base64_decode((const unsigned char*)encryptedTokenBase64.c_str(), encryptedTokenBase64.length(), &base64DecodedLength);
 
-        // Validate the token only after it is fully reassembled
-        bool isValid = token_manager.tokenIsValid(jwtToken);
-        if (isValid) {
-          M5.Lcd.println(F("Valid Token! Unlocking..."));
-          // Add unlocking logic here
+                if (!decodedToken) {
+                    M5.Lcd.println(F("Base64 decoding failed for encrypted token."));
+                    free(decryptedData);
+                    return;
+                }
+
+                memcpy(decryptedData, decodedToken, base64DecodedLength);
+
+                Serial.println("Base64 Decoded Token (Hexadecimal):");
+for (size_t i = 0; i < base64DecodedLength; i++) {
+    Serial.printf("%02X ", decodedToken[i]);
+}
+Serial.println();
+
+// Optionally, print as string if data is textual
+//Serial.println("Base64 Decoded Token (String):");
+//Serial.println((char*)decodedToken);
+                free(decodedToken);  // Free the allocated memory for decodedToken
+
+                Serial.printf("Base64 Decoded Length: %d\n", base64DecodedLength);
+
+                // Decode the AES key
+                String base64EncodedKey = "YW5vdGhlcmN1c3RvbWNsYWltYWRkZWR0b2lkdG9rZW4=";
+                size_t keyLength = (base64EncodedKey.length() * 3) / 4;
+                uint8_t aesKey[keyLength];
+
+                unsigned char* decodedKey = base64_decode((const unsigned char*)base64EncodedKey.c_str(), base64EncodedKey.length(), &keyLength);
+               
+                if (!decodedKey) {
+                    M5.Lcd.println(F("Base64 decoding failed for AES key."));
+                    free(decryptedData);
+                    return;
+                }
+
+                memcpy(aesKey, decodedKey, keyLength);
+                Serial.println("AES Key:");
+for (size_t i = 0; i < keyLength; i++) {
+    Serial.printf("%02X ", aesKey[i]);  // Print each byte as a hexadecimal value
+}
+Serial.println();
+
+
+                free(decodedKey);  // Free the allocated memory for decodedKey
+
+                if (keyLength != 16 && keyLength != 24 && keyLength != 32) {
+                    M5.Lcd.println(F("Invalid AES key length."));
+                    free(decryptedData);
+                    return;
+                }
+
+                AES aesLib;
+                aesLib.set_key(aesKey, keyLength);
+                Serial.println("AES key set successfully.");
+
+                size_t paddingLength = base64DecodedLength % 16;
+                if (paddingLength != 0) {
+                    size_t newLength = base64DecodedLength + (16 - paddingLength);
+                    uint8_t* paddedData = (uint8_t*)malloc(newLength);
+                    memset(paddedData, 0, newLength);  // Clear the padded data
+                    memcpy(paddedData, decryptedData, base64DecodedLength);  // Copy existing data into paddedData
+
+                    free(decryptedData);  // Free the original data
+                    decryptedData = paddedData;  // Update decryptedData pointer
+
+                    base64DecodedLength = newLength;  // Update the length after padding
+                }
+
+                uint8_t* encryptedToken = decryptedData;  // Use pointer if necessary
+                // Or if encryptedToken must be an array:
+                // uint8_t encryptedToken[base64DecodedLength];  // Allocate a fixed-size array
+                // memcpy(encryptedToken, decryptedData, base64DecodedLength);  // Copy padded data into the array
+
+                // Decrypt the encrypted token
+                uint8_t* tempBuffer = (uint8_t*)malloc(16);  // Allocate buffer of 16 bytes
+
+                for (size_t i = 0; i < base64DecodedLength; i += 16) {
+                    memcpy(tempBuffer, decryptedData + i, 16);  // Copy the current 16-byte block into tempBuffer
+                    aesLib.decrypt(tempBuffer, decryptedData + i);  // Pass tempBuffer as plain and store the result in decryptedData
+                    memcpy(decryptedData + i, tempBuffer, 16);  // Copy back the decrypted data from tempBuffer
+                }
+
+                free(tempBuffer);
+
+              Serial.println("Decrypted Value (Before Padding Removal):");
+for (size_t i = 0; i < base64DecodedLength; i++) {
+    Serial.printf("%02X ", decryptedData[i]);  // Print in hexadecimal
+}
+Serial.println();
+//Serial.println((char*)decryptedData);
+                
+                uint8_t paddingValue = decryptedData[base64DecodedLength - 1];
+                if (paddingValue < 1 || paddingValue > 16) {
+                    Serial.println("Invalid padding value detected!");
+                    Serial.printf("Padding Value: %u\n", paddingValue);
+                    free(decryptedData);
+                    return;
+                }
+
+                // Check padding bytes
+                for (size_t i = 0; i < paddingValue; ++i) {
+                    if (decryptedData[base64DecodedLength - 1 - i] != paddingValue) {
+                        Serial.println("Invalid padding detected!");
+                        free(decryptedData);
+                        return;
+                    }
+                }
+
+                size_t decryptedLength = base64DecodedLength - paddingValue;
+                char decryptedToken[decryptedLength + 1];
+                memcpy(decryptedToken, decryptedData, decryptedLength);
+                decryptedToken[decryptedLength] = '\0';
+                free(decryptedData);
+
+                Serial.println("Padding successfully removed.");
+                Serial.print("Decrypted Token: ");
+                Serial.println(decryptedToken);
+
+                M5.Lcd.println(F("Decrypted ID Token:"));
+                M5.Lcd.println(decryptedToken);
+
+                // Validate the token
+                String jwtToken = String(decryptedToken);
+                if (token_manager.tokenIsValid(jwtToken)) {
+                    M5.Lcd.println(F("Valid Token! Unlocking..."));
+                } else {
+                    M5.Lcd.println(F("Invalid Token."));
+                }
+
+                // Reset fullToken buffer
+                fullToken = "";
+            }
         } else {
-          M5.Lcd.println(F("Invalid Token"));
+            M5.Lcd.println(F("Received empty token chunk."));
         }
-
-        // Reset the full token buffer for the next transmission
-        fullToken = ""; 
-      } else {
-        // If the delimiter isn't found, indicate that the token is still incomplete
-        M5.Lcd.println(F("Chunk received but no END_OF_TOKEN yet."));
-      }
-    } else {
-      // If the token chunk is empty, indicate that no data was received
-      M5.Lcd.println(F("Received empty token chunk."));
     }
-  }
 };
+
+
+
+
 
 
 
@@ -215,10 +356,9 @@ void setup() {
   pServer->getAdvertising()->start();
 
   token_manager.rsa_public_key = (char*)rsa_public_key;
-  M5.Lcd.print(F("Waiting for a BLE client to connect........."));
+  M5.Lcd.print(F("Waiting for a BLE client to connect....."));
+  Serial.println("Waiting for a BLE client to connect.....");
   
-  
-
 }
 
 void loop() {
