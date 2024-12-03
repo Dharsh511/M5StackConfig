@@ -27,7 +27,7 @@ bool isTokenValid = false;
 String jwtToken = "";
 
 
-// Example sound data (a simple beep sound)
+
 const unsigned char soundData[] = {
   0x52, 0x49, 0x46, 0x46, 0x24, 0x08, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6D, 0x74, 0x20,
   0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x40, 0x1F, 0x00, 0x00, 0x80, 0x3E, 0x00, 0x00,
@@ -47,7 +47,7 @@ const unsigned char soundData[] = {
   0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
 };
 
-// Example sound data (a simple beep sound)
+
 const unsigned char unlockSoundData[] = {
   0x52, 0x49, 0x46, 0x46, 0x24, 0x08, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45, 0x66, 0x6D, 0x74, 0x20,
   0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x40, 0x1F, 0x00, 0x00, 0x80, 0x3E, 0x00, 0x00,
@@ -158,9 +158,9 @@ String encryptedTokenBase64 = String(fullToken.c_str());
 Serial.println(encryptedTokenBase64);
 Serial.printf("Encrypted Token Length: %d\n", encryptedTokenBase64.length());
 
-// Decode the Base64-encoded encrypted token
+
 size_t base64DecodedLength = (encryptedTokenBase64.length() * 3) / 4;
-uint8_t* decryptedData = (uint8_t*)malloc(base64DecodedLength);  // Allocate memory for decrypted data
+uint8_t* decryptedData = (uint8_t*)malloc(base64DecodedLength);  
 if (!decryptedData) {
     M5.Lcd.println(F("Memory allocation for decryptedData failed."));
     return;
@@ -184,7 +184,7 @@ Serial.println();
 
 Serial.printf("Base64 Decoded Length: %d\n", base64DecodedLength);
 
-// Decode the AES key
+
 String base64EncodedKey = "YW5vdGhlcmN1c3RvbWNsYWltYWRkZWR0b2lkdG9rZW4=";
 size_t keyLength = (base64EncodedKey.length() * 3) / 4;
 uint8_t aesKey[keyLength];
@@ -197,7 +197,7 @@ if (!decodedKey) {
 }
 
 memcpy(aesKey, decodedKey, keyLength);
-free(decodedKey);  // Free the allocated memory for decodedKey
+free(decodedKey);  
 
 Serial.println("AES Key:");
 for (size_t i = 0; i < keyLength; i++) {
@@ -211,13 +211,13 @@ if (keyLength != 16 && keyLength != 24 && keyLength != 32) {
     return;
 }
 
-// Decrypt using AES (Assuming AES-256 here, ECB mode)
+
 AES aesLib;
-aesLib.set_key(aesKey, keyLength);  // Set the AES key
+aesLib.set_key(aesKey, keyLength);  
 Serial.println("AES key set successfully.");
 
-// Decrypt data in blocks of 16 bytes
-size_t blockSize = 16;  // AES block size is 16 bytes
+
+size_t blockSize = 16; 
 for (size_t i = 0; i < base64DecodedLength; i += blockSize) {
     size_t currentBlockSize = (i + blockSize <= base64DecodedLength) ? blockSize : base64DecodedLength - i;
     aesLib.decrypt(&decryptedData[i], &decryptedData[i]);
@@ -225,40 +225,40 @@ for (size_t i = 0; i < base64DecodedLength; i += blockSize) {
 
 Serial.println("Decrypted Value (Before Padding Removal):");
 for (size_t i = 0; i < base64DecodedLength; i++) {
-    Serial.printf("%02X", decryptedData[i]);  // Print in hexadecimal
+    Serial.printf("%02X", decryptedData[i]);  
 }
 Serial.println();
 
-// PKCS5 Padding removal logic
+
 if (base64DecodedLength > 0) {
     uint8_t paddingValue = decryptedData[base64DecodedLength - 1];
     // If the padding value is valid (between 1 and blockSize), remove the padding
     if (paddingValue > 0 && paddingValue <= 16) {
-        base64DecodedLength -= paddingValue;  // Remove padding
+        base64DecodedLength -= paddingValue;  
     }
 }
 
-// Print the decrypted data after padding removal
+
 Serial.println("Decrypted Value (After Padding Removal):");
 for (size_t i = 0; i < base64DecodedLength; i++) {
-    Serial.printf("%02X", decryptedData[i]);  // Print in hexadecimal
+    Serial.printf("%02X", decryptedData[i]);
 }
 Serial.println();
 
 
 
 
-// Convert the decrypted data to a string
+
 char decryptedToken[base64DecodedLength + 1];
 memcpy(decryptedToken, decryptedData, base64DecodedLength);
-decryptedToken[base64DecodedLength] = '\0';  // Null-terminate the string
+decryptedToken[base64DecodedLength] = '\0';
 Serial.println("Decrypted Token:");
-Serial.println(decryptedToken);  // Optionally print decrypted token as string
+Serial.println(decryptedToken);
 
-free(decryptedData);  // Free the allocated memory
+free(decryptedData); 
 
 
-                // Validate the token
+
                 String jwtToken = String(decryptedToken);
                 if (token_manager.tokenIsValid(jwtToken)) {
                     M5.Lcd.println(F("Valid Token! Unlocking..."));
@@ -269,7 +269,7 @@ free(decryptedData);  // Free the allocated memory
 
                 }
 
-                // Reset fullToken buffer
+                
                 fullToken = "";
             }
         } else {
@@ -294,12 +294,12 @@ void setup() {
 
 
 
-  // Initialize BLE
+
   BLEDevice::init("M5Stack Core2 BLE Reader");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
 
-  // Create BLE Service
+
   BLEService *pService = pServer->createService(SERVICE_UUID);
 
   // Create BLE Characteristic
@@ -311,7 +311,7 @@ void setup() {
 
   //pCharacteristic->addDescriptor(new BLE2902());
 
-  // Create BLE Characteristic
+
   unlockCharacteristic = pService->createCharacteristic(
                           UNLOCK_CHARACTERISTIC_UUID,
                           BLECharacteristic::PROPERTY_READ |
@@ -321,10 +321,10 @@ void setup() {
   unlockCharacteristic->setCallbacks(new UnlockCallbacks());
 
  
-  // Start the service
+
   pService->start();
 
-  // Start advertising
+
   pServer->getAdvertising()->start();
 
   token_manager.rsa_public_key = (char*)rsa_public_key;
